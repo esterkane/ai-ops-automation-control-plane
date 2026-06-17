@@ -1,5 +1,7 @@
 # AI Ops Automation Control Plane
 
+[![CI](https://github.com/esterkane/ai-ops-automation-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/esterkane/ai-ops-automation-control-plane/actions/workflows/ci.yml)
+
 A self-hosted, on-premises AI workflow automation suite. It pairs **n8n** (visual
 workflow orchestration) with a **FastAPI tools microservice** for the custom AI
 logic — Retrieval-Augmented Generation over an internal knowledge base, document

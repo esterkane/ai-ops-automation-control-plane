@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  tools:
+    name: tools (lint · type · test)
+    runs-on: ubuntu-latest
+
+    # Real Postgres + pgvector — the integration tests do not mock the DB.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: aiops
+          POSTGRES_PASSWORD: aiops
+          POSTGRES_DB: aiops
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aiops -d aiops"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://aiops:aiops@localhost:5432/aiops
+      EMBEDDING_PROVIDER: local
+      LLM_PROVIDER: local
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Postgres client
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Bootstrap database schema
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f postgres/init/01-init.sql
+
+      - name: Install tools dependencies
+        working-directory: tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Ruff
+        working-directory: tools
+        run: ruff check .
+
+      - name: Mypy (strict)
+        working-directory: tools
+        run: mypy app
+
+      - name: Pytest
+        working-directory: tools
+        run: pytest -q
