@@ -1,0 +1,45 @@
+[project]
+name = "aiops-tools"
+version = "0.1.0"
+description = "FastAPI tools microservice for the AI ops control plane (RAG, extraction, embeddings)."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "psycopg[binary]>=3.2",
+    "pgvector>=0.3",
+    "httpx>=0.27",
+    "pypdf>=4.2",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "fpdf2>=2.7",  # generating sample invoice PDFs for tests/demos
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]

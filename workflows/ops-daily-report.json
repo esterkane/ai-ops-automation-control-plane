@@ -1,0 +1,191 @@
+{
+  "name": "Ops Daily Report",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "days", "triggerAtHour": 8, "triggerAtMinute": 0 }
+          ]
+        }
+      },
+      "id": "node-schedule",
+      "name": "Every Day 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-200, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT count(*) AS new_leads FROM app.leads WHERE created_at > now() - interval '24 hours'",
+        "options": {}
+      },
+      "id": "node-q-leads",
+      "name": "Query: Leads (24h)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [40, 300],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "SupportBrain Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT count(*) AS new_tickets, count(*) FILTER (WHERE status = 'open') AS open_tickets, count(*) FILTER (WHERE priority = 'high') AS high_priority FROM app.tickets WHERE created_at > now() - interval '24 hours'",
+        "options": {}
+      },
+      "id": "node-q-tickets",
+      "name": "Query: Tickets (24h)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [260, 300],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "SupportBrain Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT count(*) AS new_invoices, coalesce(sum(total), 0) AS invoice_total, count(*) FILTER (WHERE low_confidence) AS needs_review FROM app.invoices WHERE created_at > now() - interval '24 hours'",
+        "options": {}
+      },
+      "id": "node-q-invoices",
+      "name": "Query: Invoices (24h)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [480, 300],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "SupportBrain Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const leads = $('Query: Leads (24h)').first().json;\nconst tickets = $('Query: Tickets (24h)').first().json;\nconst invoices = $('Query: Invoices (24h)').first().json;\nreturn [{ json: { metrics: { leads, tickets, invoices } } }];"
+      },
+      "id": "node-assemble",
+      "name": "Assemble Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": { "temperature": 0.2 }
+      },
+      "id": "node-openai-model",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [920, 520],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ JSON.stringify($json.metrics) }}",
+        "options": {
+          "systemMessage": "You are an operations analyst. Given JSON metrics for the last 24 hours (leads, tickets, invoices), write a concise, plain-English daily report for a holding company's leadership. Lead with the headline numbers, call out anything needing attention (open/high-priority tickets, invoices needing review), and keep it under 150 words. Do not invent numbers that are not in the data."
+        }
+      },
+      "id": "node-summary-agent",
+      "name": "Summary Writer",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": { "__rl": true, "mode": "name", "value": "#ops" },
+        "text": "=:bar_chart: *Daily Ops Report*\n\n{{ $json.output }}",
+        "otherOptions": {}
+      },
+      "id": "node-slack-report",
+      "name": "Post Report (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [1200, 200],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "ops@example.com",
+        "subject": "Daily Ops Report",
+        "emailType": "text",
+        "message": "={{ $json.output }}",
+        "options": {}
+      },
+      "id": "node-gmail-report",
+      "name": "Email Report (Gmail)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1200, 400],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Day 08:00": {
+      "main": [[{ "node": "Query: Leads (24h)", "type": "main", "index": 0 }]]
+    },
+    "Query: Leads (24h)": {
+      "main": [[{ "node": "Query: Tickets (24h)", "type": "main", "index": 0 }]]
+    },
+    "Query: Tickets (24h)": {
+      "main": [[{ "node": "Query: Invoices (24h)", "type": "main", "index": 0 }]]
+    },
+    "Query: Invoices (24h)": {
+      "main": [[{ "node": "Assemble Metrics", "type": "main", "index": 0 }]]
+    },
+    "Assemble Metrics": {
+      "main": [[{ "node": "Summary Writer", "type": "main", "index": 0 }]]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [[{ "node": "Summary Writer", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "Summary Writer": {
+      "main": [
+        [
+          { "node": "Post Report (Slack)", "type": "main", "index": 0 },
+          { "node": "Email Report (Gmail)", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {}
+}

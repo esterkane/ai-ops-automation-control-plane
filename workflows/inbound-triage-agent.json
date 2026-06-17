@@ -1,0 +1,268 @@
+{
+  "name": "Inbound Triage Agent",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "inbound",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "node-webhook-inbound",
+      "name": "Webhook: Inbound",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-160, 320],
+      "webhookId": "inbound-triage"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "node-openai-model",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [120, 540],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.body?.message ?? $json.body?.text ?? JSON.stringify($json.body) }}",
+        "options": {
+          "systemMessage": "You triage inbound messages for a holding company's operations team. Classify each message into exactly one category: lead, support, invoice, or hr. Then extract any relevant fields.\n\nRespond with ONLY a JSON object, no prose, in this shape:\n{\n  \"category\": \"lead|support|invoice|hr\",\n  \"name\": string|null,\n  \"email\": string|null,\n  \"company\": string|null,\n  \"subject\": string|null,\n  \"summary\": string\n}"
+        }
+      },
+      "id": "node-classifier-agent",
+      "name": "Classifier Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [120, 320]
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = $json.output ?? $json.text ?? '';\nlet parsed;\ntry {\n  parsed = typeof out === 'object' ? out : JSON.parse(out);\n} catch (e) {\n  // Fall back to support so nothing is silently dropped.\n  parsed = { category: 'support', summary: String(out).slice(0, 500) };\n}\nconst category = ['lead', 'support', 'invoice', 'hr'].includes(parsed.category)\n  ? parsed.category\n  : 'support';\nreturn [{ json: { ...$json, classification: parsed, category } }];"
+      },
+      "id": "node-parse-classification",
+      "name": "Parse Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [360, 320]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  {
+                    "id": "rule-lead",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "lead",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "lead"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  {
+                    "id": "rule-support",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "support",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "support"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  {
+                    "id": "rule-invoice",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "invoice",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "invoice"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  {
+                    "id": "rule-hr",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "hr",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "hr"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-switch-category",
+      "name": "Route by Category",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [600, 320]
+    },
+    {
+      "parameters": {
+        "schema": { "__rl": true, "mode": "list", "value": "app" },
+        "table": { "__rl": true, "mode": "list", "value": "leads" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "name": "={{ $json.classification.name }}",
+            "email": "={{ $json.classification.email }}",
+            "company": "={{ $json.classification.company }}",
+            "message": "={{ $json.classification.summary }}",
+            "source": "inbound-webhook"
+          }
+        },
+        "options": {}
+      },
+      "id": "node-insert-lead",
+      "name": "Insert Lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [880, 60],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "SupportBrain Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schema": { "__rl": true, "mode": "list", "value": "app" },
+        "table": { "__rl": true, "mode": "list", "value": "tickets" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "subject": "={{ $json.classification.subject ?? 'Support request' }}",
+            "body": "={{ $json.classification.summary }}",
+            "requester": "={{ $json.classification.email }}",
+            "channel": "inbound-webhook",
+            "priority": "normal"
+          }
+        },
+        "options": {}
+      },
+      "id": "node-create-ticket",
+      "name": "Create Ticket",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [880, 240],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "SupportBrain Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://tools:8000/extract",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-call-extract",
+      "name": "Call /extract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 420]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": { "__rl": true, "mode": "name", "value": "#hr" },
+        "text": "=:office: *New HR message* from {{ $json.classification.name ?? 'unknown' }}\n{{ $json.classification.summary }}",
+        "otherOptions": {}
+      },
+      "id": "node-notify-hr",
+      "name": "Notify HR (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [880, 600],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook: Inbound": {
+      "main": [[{ "node": "Classifier Agent", "type": "main", "index": 0 }]]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [[{ "node": "Classifier Agent", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "Classifier Agent": {
+      "main": [[{ "node": "Parse Classification", "type": "main", "index": 0 }]]
+    },
+    "Parse Classification": {
+      "main": [[{ "node": "Route by Category", "type": "main", "index": 0 }]]
+    },
+    "Route by Category": {
+      "main": [
+        [{ "node": "Insert Lead", "type": "main", "index": 0 }],
+        [{ "node": "Create Ticket", "type": "main", "index": 0 }],
+        [{ "node": "Call /extract", "type": "main", "index": 0 }],
+        [{ "node": "Notify HR (Slack)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {}
+}

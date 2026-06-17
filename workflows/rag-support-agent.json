@@ -1,0 +1,155 @@
+{
+  "name": "RAG Support Agent",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "support",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook-support",
+      "name": "Webhook: Support Chat",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-160, 300],
+      "webhookId": "rag-support"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://tools:8000/answer",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: $json.body?.query ?? $json.body?.text ?? '', top_k: 5 }) }}",
+        "options": {}
+      },
+      "id": "node-call-answer",
+      "name": "Call /answer (RAG)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [80, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "cond-low-conf",
+              "leftValue": "={{ $json.low_confidence }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-if-lowconf",
+      "name": "Low confidence?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [320, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": { "__rl": true, "mode": "name", "value": "#ops" },
+        "text": "=:warning: *Low-confidence support question — needs a human*\n*Q:* {{ $('Webhook: Support Chat').item.json.body.query }}\n*Best confidence:* {{ $json.confidence }}\n*Draft answer:* {{ $json.answer }}",
+        "otherOptions": {}
+      },
+      "id": "node-escalate-slack",
+      "name": "Escalate to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [600, 160],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schema": { "__rl": true, "mode": "list", "value": "app" },
+        "table": { "__rl": true, "mode": "list", "value": "tickets" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "subject": "={{ 'Escalated: ' + ($('Webhook: Support Chat').item.json.body.query).slice(0, 80) }}",
+            "body": "={{ $json.answer }}",
+            "channel": "rag-support",
+            "priority": "high",
+            "status": "open"
+          }
+        },
+        "options": {}
+      },
+      "id": "node-create-escalation",
+      "name": "Create Escalation Ticket",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [600, 360],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "SupportBrain Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'escalated', message: 'Routed to a human reviewer.', confidence: $json.confidence }) }}",
+        "options": {}
+      },
+      "id": "node-respond-escalated",
+      "name": "Respond: Escalated",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [860, 260]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ answer: $json.answer, citations: $json.citations, confidence: $json.confidence }) }}",
+        "options": {}
+      },
+      "id": "node-respond-answer",
+      "name": "Respond: Cited Answer",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [600, 540]
+    }
+  ],
+  "connections": {
+    "Webhook: Support Chat": {
+      "main": [[{ "node": "Call /answer (RAG)", "type": "main", "index": 0 }]]
+    },
+    "Call /answer (RAG)": {
+      "main": [[{ "node": "Low confidence?", "type": "main", "index": 0 }]]
+    },
+    "Low confidence?": {
+      "main": [
+        [
+          { "node": "Escalate to Slack", "type": "main", "index": 0 },
+          { "node": "Create Escalation Ticket", "type": "main", "index": 0 }
+        ],
+        [{ "node": "Respond: Cited Answer", "type": "main", "index": 0 }]
+      ]
+    },
+    "Escalate to Slack": {
+      "main": [[{ "node": "Respond: Escalated", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "meta": {}
+}
